@@ -1,11 +1,12 @@
 from flask import Flask, request, jsonify, render_template, Response, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from functools import wraps
+from datetime import datetime
 
 app = Flask(__name__)
 
 # Konfiguracja SQLite
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///patients.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -20,7 +21,18 @@ class Patient(db.Model):
     def __repr__(self):
         return f'<Patient {self.first_name} {self.last_name}>'
 
-# Tworzenie tabeli w bazie danych
+# Model posta blogowego
+class BlogPost(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    author = db.Column(db.String(50), nullable=False, default='Admin')
+    date_created = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<BlogPost {self.title}>'
+
+# Tworzenie tabel w bazie danych
 with app.app_context():
     db.create_all()
 
@@ -28,14 +40,12 @@ with app.app_context():
 def check_auth(username, password):
     return username == 'admin' and password == 'secret'
 
-# Funkcja zwracająca odpowiedź o braku dostępu
 def authenticate():
     return Response(
         'Access denied. Please provide valid credentials.', 401,
         {'WWW-Authenticate': 'Basic realm="Login Required"'}
     )
 
-# Dekorator do zabezpieczenia endpointu
 def requires_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -48,9 +58,9 @@ def requires_auth(f):
 # Strona główna
 @app.route('/')
 def home():
-    return "Welcome to the Physiotherapy Platform!"
+    return render_template('index.html')
 
-# Endpoint do rejestracji pacjenta przez API
+# Rejestracja pacjentów przez API
 @app.route('/register', methods=['POST'])
 def register_patient_api():
     data = request.json
@@ -71,7 +81,7 @@ def register_patient_api():
         db.session.rollback()
         return jsonify({"error": "Email already exists."}), 400
 
-# Endpoint do rejestracji pacjenta przez formularz
+# Rejestracja pacjentów przez formularz
 @app.route('/register-patient', methods=['GET', 'POST'])
 def register_patient_form():
     if request.method == 'POST':
@@ -93,12 +103,43 @@ def register_patient_form():
             return render_template('register.html', error="Email already exists.")
     return render_template('register.html')
 
-# Endpoint do wyświetlania listy pacjentów (zabezpieczony hasłem)
+# Lista pacjentów
 @app.route('/patients', methods=['GET'])
 @requires_auth
 def list_patients():
     patients = Patient.query.all()
     return render_template('patients.html', patients=patients)
+
+# Blog - lista postów
+@app.route('/blog', methods=['GET'])
+def blog():
+    posts = BlogPost.query.order_by(BlogPost.date_created.desc()).all()
+    return render_template('blog.html', posts=posts)
+
+# Blog - szczegóły posta
+@app.route('/blog/<int:post_id>', methods=['GET'])
+def blog_post(post_id):
+    post = BlogPost.query.get_or_404(post_id)
+    return render_template('blog_post.html', post=post)
+
+# Blog - tworzenie nowego posta
+@app.route('/blog/new', methods=['GET', 'POST'])
+@requires_auth
+def new_blog_post():
+    if request.method == 'POST':
+        title = request.form.get('title')
+        content = request.form.get('content')
+        author = request.form.get('author', 'Admin')
+
+        if not title or not content:
+            return render_template('new_blog_post.html', error="Title and content are required.")
+
+        new_post = BlogPost(title=title, content=content, author=author)
+        db.session.add(new_post)
+        db.session.commit()
+        return redirect(url_for('blog'))
+
+    return render_template('new_blog_post.html')
 
 if __name__ == '__main__':
     app.run(debug=True)
