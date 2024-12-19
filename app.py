@@ -31,6 +31,17 @@ class BlogPost(db.Model):
 
     def __repr__(self):
         return f'<BlogPost {self.title}>'
+    
+# Model komentarzy
+class Comment(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    content = db.Column(db.Text, nullable=False)
+    author = db.Column(db.String(50), nullable=False, default='Anonymous')
+    date_created = db.Column(db.DateTime, default=datetime.utcnow)
+    post_id = db.Column(db.Integer, db.ForeignKey('blog_post.id'), nullable=False)
+
+    def __repr__(self):
+        return f'<Comment {self.content[:20]}...>'
 
 # Tworzenie tabel w bazie danych
 with app.app_context():
@@ -117,10 +128,29 @@ def blog():
     return render_template('blog.html', posts=posts)
 
 # Blog - szczegóły posta
-@app.route('/blog/<int:post_id>', methods=['GET'])
+@app.route('/blog/<int:post_id>', methods=['GET', 'POST'])
 def blog_post(post_id):
     post = BlogPost.query.get_or_404(post_id)
-    return render_template('blog_post.html', post=post)
+
+    if request.method == 'POST':
+        # Pobranie danych z formularza
+        content = request.form.get('content')
+        author = request.form.get('author', 'Anonymous')
+
+        # Walidacja
+        if not content:
+            return render_template('blog_post.html', post=post, comments=post.comments, error="Treść komentarza jest wymagana.")
+
+        # Dodanie komentarza do bazy danych
+        new_comment = Comment(content=content, author=author, post_id=post.id)
+        db.session.add(new_comment)
+        db.session.commit()
+        return redirect(url_for('blog_post', post_id=post.id))
+
+    # Pobranie komentarzy do posta
+    comments = Comment.query.filter_by(post_id=post.id).order_by(Comment.date_created.desc()).all()
+    return render_template('blog_post.html', post=post, comments=comments)
+
 
 # Blog - tworzenie nowego posta
 @app.route('/blog/new', methods=['GET', 'POST'])
@@ -140,6 +170,9 @@ def new_blog_post():
         return redirect(url_for('blog'))
 
     return render_template('new_blog_post.html')
+
+
+
 
 if __name__ == '__main__':
     app.run(debug=True)
